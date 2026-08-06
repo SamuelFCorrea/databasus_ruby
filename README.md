@@ -109,9 +109,17 @@ A database can reach its own backups, which delegates to the `backups` endpoint
 with the same filters as `client.backups.list`:
 
 ```ruby
+database.backups(status: "COMPLETED", limit: 25)
+database.backup                                    # queue a run
+
+# or by id, from the endpoint
 client.databases.backups(database.id, status: "COMPLETED", limit: 25)
-client.databases.backup(database.id)               # queue a run
+client.databases.backup(database.id)
 ```
+
+`list`, `get`, `create`, `update` and `copy` return `DatabasusRuby::Database`
+records: payload objects that read exactly like any other response but also
+carry the two methods above.
 
 `update` posts to `/databases/update` with the id in the body, matching the API.
 There is also `test_connection_direct`, `create_readonly_user`,

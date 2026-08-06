@@ -7,4 +7,4 @@
 * When interpreting the words and actions of others, participants should always assume good intentions.
 * Behaviour which can be reasonably considered harassment will not be tolerated.
 
-If you have any concerns about behaviour within this project, please contact us at ["samuel.correa@meliusid.com"](mailto:"samuel.correa@meliusid.com").
+If you have any concerns about behaviour within this project, please contact us at ["samuelfelipecorrea@gmail.com"](mailto:"samuelfelipecorrea@gmail.com").

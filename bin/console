@@ -3,9 +3,25 @@
 
 require "bundler/setup"
 require "databasus_ruby"
+require "irb"
 
 # You can add fixtures and/or initialization code here to make experimenting
 # with your gem easier. You can also use a different console, if you like.
 
-require "irb"
-IRB.start(__FILE__)
+client = DatabasusRuby::Client.new(
+  api_key: ENV.fetch("DATABASUS_API_KEY", nil),
+  url: ENV.fetch("DATABASUS_URL", "http://127.0.0.1:4005/api/v1/"),
+  workspace_id: ENV.fetch("DATABASUS_WORKSPACE_ID", nil)
+)
+
+# The api_key above is a verification-agent token, which only authorizes the
+# /agent/* endpoints. Everything else needs a user JWT, so sign in first:
+#
+#   client.auth.signin!(email: "you@example.com", password: "...")
+#   client.workspaces.list.map(&:name)
+#   client.databases.list(workspace_id: client.workspaces.list.first.id)
+#
+# `signin!` installs the returned token on `client` for you.
+
+# binding.irb (rather than IRB.start) keeps `client` in scope inside the session.
+binding.irb # rubocop:disable Lint/Debugger

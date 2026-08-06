@@ -1,4 +1,307 @@
 module DatabasusRuby
   VERSION: String
-  # See the writing guide of rbs: https://github.com/ruby/rbs#guides
+
+  type payload = Hash[untyped, untyped]
+
+  class Error < StandardError
+  end
+
+  class ConfigurationError < Error
+  end
+
+  class APIError < Error
+    STATUS_ERRORS: Hash[Integer, singleton(APIError)]
+
+    attr_reader status: Integer?
+    attr_reader body: untyped
+    attr_reader response: untyped
+
+    def initialize: (?String? message, ?status: Integer?, ?body: untyped, ?response: untyped) -> void
+    def self.from_response: (untyped response) -> APIError
+    def self.for_status: (Integer status) -> singleton(APIError)
+  end
+
+  class BadRequestError < APIError
+  end
+
+  class AuthenticationError < APIError
+  end
+
+  class ForbiddenError < APIError
+  end
+
+  class NotFoundError < APIError
+  end
+
+  class ConflictError < APIError
+  end
+
+  class RateLimitError < APIError
+  end
+
+  class ServerError < APIError
+  end
+
+  class Object
+    def initialize: (?payload attributes) -> void
+    def to_h: () -> payload
+    def to_hash: () -> payload
+    def []: (String | Symbol key) -> untyped
+    def key?: (String | Symbol key) -> bool
+    def has_key?: (String | Symbol key) -> bool
+    def keys: () -> Array[String]
+    def ==: (untyped other) -> bool
+    def eql?: (untyped other) -> bool
+    def hash: () -> Integer
+    def inspect: () -> String
+    def method_missing: (Symbol name, *untyped args) ?{ (?) -> untyped } -> untyped
+    def respond_to_missing?: (Symbol name, ?bool include_private) -> bool
+  end
+
+  class Record < Object
+    attr_reader client: Client
+
+    def initialize: (Client client, ?payload attributes) -> void
+
+    private
+
+    def id!: () -> String
+  end
+
+  class Database < Record
+    def backups: (**untyped) -> Collection
+    def backup: () -> Object
+  end
+
+  class Collection
+    include Enumerable[Object]
+
+    attr_reader data: Array[Object]
+    attr_reader total: Integer
+    attr_reader limit: Integer?
+    attr_reader offset: Integer?
+
+    def initialize: (
+      ?data: Array[payload | Object],
+      ?total: Integer?,
+      ?limit: Integer?,
+      ?offset: Integer?,
+      ?wrap: ^(payload) -> Object | nil
+    ) -> void
+    def self.from: (untyped body, key: String, ?wrap: (^(payload) -> Object)?) -> Collection
+    def each: () { (Object) -> void } -> Collection
+            | () -> Enumerator[Object, Array[Object]]
+    def size: () -> Integer
+    def length: () -> Integer
+    def empty?: () -> bool
+    def []: (Integer index) -> Object?
+    def last: () -> Object?
+    def paginated?: () -> bool
+    def next_offset: () -> Integer?
+    def last_page?: () -> bool
+    def inspect: () -> String
+  end
+
+  module Endpoint
+    attr_reader client: Client
+
+    def initialize: (Client client) -> void
+    def inspect: () -> String
+
+    private
+
+    def http_get: (String path, ?payload? params) -> untyped
+    def http_post: (String path, ?payload? body, ?params: payload?) -> untyped
+    def http_put: (String path, ?payload? body, ?params: payload?) -> untyped
+    def http_delete: (String path, ?payload? params) -> untyped
+    def object: (untyped response, ?as: singleton(Object)) -> Object
+    def collection: (untyped response, key: String, ?as: singleton(Object)) -> Collection
+    def build: (singleton(Object) klass, payload attributes) -> Object
+    def acknowledged: (untyped response) -> bool
+    def single_value: (untyped response) -> untyped
+    def compact: (untyped body) -> untyped
+    def with_default_workspace: (payload attributes) -> payload
+    def escape: (untyped segment) -> String
+  end
+
+  class Client
+    attr_reader adapter: untyped
+    attr_reader url: String
+    attr_accessor api_key: String?
+    attr_accessor agent_id: String?
+    attr_accessor workspace_id: String?
+
+    def initialize: (
+      ?api_key: String?,
+      ?url: String?,
+      ?agent_id: String?,
+      ?workspace_id: String?,
+      ?adapter: untyped
+    ) -> void
+
+    def connection: () -> untyped
+    def auth: () -> Auth
+    def backups: () -> Backups
+    def databases: () -> Databases
+    def notifiers: () -> Notifiers
+    def storages: () -> Storages
+    def users: () -> Users
+    def workspaces: () -> Workspaces
+    def workspace_id!: () -> String
+    def agent_id!: () -> String
+    def request: (
+      Symbol method,
+      String path,
+      ?params: payload?,
+      ?body: untyped,
+      ?headers: Hash[String, String]?
+    ) -> untyped
+    def inspect: () -> String
+  end
+
+  class Auth < Object
+    include Endpoint
+
+    def signin: (email: String, password: String, ?cloudflare_turnstile_token: String?) -> Object
+    def signup: (email: String, name: String, password: String, ?cloudflare_turnstile_token: String?) -> Object
+    def github_callback: (code: String, redirect_uri: String) -> Object
+    def google_callback: (code: String, redirect_uri: String) -> Object
+    def send_reset_password_code: (email: String, ?cloudflare_turnstile_token: String?) -> Object
+    def reset_password: (email: String, code: String, new_password: String) -> Object
+  end
+
+  class Backups < Object
+    include Endpoint
+
+    STATUSES: Array[String]
+    ENCRYPTIONS: Array[String]
+    VERIFICATION_STATUSES: Array[String]
+
+    def list: (
+      database_id: String,
+      ?limit: Integer?,
+      ?offset: Integer?,
+      ?status: (String | Array[String])?,
+      ?before_date: String?,
+      ?pg_wal_backup_type: String?
+    ) -> Collection
+    def all: (
+      database_id: String,
+      ?limit: Integer?,
+      ?offset: Integer?,
+      ?status: (String | Array[String])?,
+      ?before_date: String?,
+      ?pg_wal_backup_type: String?
+    ) -> Collection
+    def create: (database_id: String) -> Object
+    def trigger: (database_id: String) -> Object
+    def delete: (String id) -> bool
+    def cancel: (String id) -> bool
+    def download_token: (String id) -> Object
+    def file: (String id, token: String) -> String
+    def download: (String id) -> [String, String]
+  end
+
+  class Databases < Object
+    include Endpoint
+
+    TYPES: Array[String]
+    HEALTH_STATUSES: Array[String]
+
+    def list: (?workspace_id: String?) -> Collection
+    def all: (?workspace_id: String?) -> Collection
+    def get: (String id) -> Database
+    def find: (String id) -> Database
+    def create: (**untyped) -> Database
+    def update: (**untyped) -> Database
+    def delete: (String id) -> bool
+    def copy: (String id) -> Database
+    def test_connection: (String id) -> bool
+    def test_connection_direct: (**untyped) -> bool
+    def create_readonly_user: (**untyped) -> Object
+    def create_replication_only_user: (**untyped) -> Object
+    def readonly: (**untyped) -> Object
+    def readonly?: (**untyped) -> bool
+    def notifier_databases_count: (String notifier_id) -> untyped
+    def notifier_using?: (String notifier_id) -> bool
+    def backups: (String id, **untyped) -> Collection
+    def backup: (String id) -> Object
+  end
+
+  class Notifiers < Object
+    include Endpoint
+
+    TYPES: Array[String]
+    NOTIFICATION_TYPES: Array[String]
+
+    def list: (?workspace_id: String?) -> Collection
+    def all: (?workspace_id: String?) -> Collection
+    def get: (String id) -> Object
+    def find: (String id) -> Object
+    def save: (**untyped) -> Object
+    def create: (**untyped) -> Object
+    def update: (**untyped) -> Object
+    def delete: (String id) -> bool
+    def test: (String id) -> bool
+    def direct_test: (**untyped) -> bool
+    def transfer: (String id, target_workspace_id: String) -> bool
+  end
+
+  class Storages < Object
+    include Endpoint
+
+    TYPES: Array[String]
+
+    def list: (?workspace_id: String?) -> Collection
+    def all: (?workspace_id: String?) -> Collection
+    def get: (String id) -> Object
+    def find: (String id) -> Object
+    def save: (**untyped) -> Object
+    def create: (**untyped) -> Object
+    def update: (**untyped) -> Object
+    def delete: (String id) -> bool
+    def test: (String id) -> bool
+    def direct_test: (**untyped) -> bool
+    def transfer: (String id, target_workspace_id: String) -> bool
+  end
+
+  class Users < Object
+    include Endpoint
+
+    ROLES: Array[String]
+
+    def me: () -> Object
+    def update_me: (?name: String?, ?email: String?) -> Object
+    def change_password: (new_password: String) -> Object
+    def invite: (email: String, ?intended_workspace_id: String?, ?intended_workspace_role: String?) -> Object
+    def list: (?limit: Integer?, ?offset: Integer?, ?before_date: String?, ?query: String?) -> Collection
+    def all: (?limit: Integer?, ?offset: Integer?, ?before_date: String?, ?query: String?) -> Collection
+    def get: (String id) -> Object
+    def find: (String id) -> Object
+    def activate: (String id) -> bool
+    def deactivate: (String id) -> bool
+    def change_role: (String id, role: String) -> bool
+    def settings: () -> Object
+    def update_settings: (**untyped) -> Object
+  end
+
+  class Workspaces < Object
+    include Endpoint
+
+    MEMBER_ROLES: Array[String]
+
+    def list: () -> Collection
+    def all: () -> Collection
+    def create: (name: String) -> Object
+    def get: (String id) -> Object
+    def find: (String id) -> Object
+    def update: (String id, **untyped) -> Object
+    def delete: (String id) -> bool
+    def audit_logs: (String id, ?limit: Integer?, ?offset: Integer?, ?before_date: String?) -> Collection
+    def members: (String id) -> Collection
+    def add_member: (String id, email: String, role: String) -> Object
+    def remove_member: (String id, String user_id) -> bool
+    def change_member_role: (String id, String user_id, role: String) -> bool
+    def transfer_ownership: (String id, new_owner_email: String) -> bool
+  end
 end

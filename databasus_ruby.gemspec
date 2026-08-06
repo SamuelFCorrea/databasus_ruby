@@ -6,23 +6,25 @@ Gem::Specification.new do |spec|
   spec.name = "databasus_ruby"
   spec.version = DatabasusRuby::VERSION
   spec.authors = ["SamuelFCorrea"]
-  spec.email = ["samuel.correa@meliusid.com"]
+  spec.email = ["samuelfelipecorrea@gmail.com"]
 
-  spec.summary = "TODO: Write a short summary, because RubyGems requires one."
-  spec.description = "TODO: Write a longer description or delete this line."
-  spec.homepage = "TODO: Put your gem's website or public repo URL here."
+  spec.summary = "Ruby client for the Databasus backup-management API"
+  spec.description = <<~DESCRIPTION
+    A Ruby wrapper around the Databasus HTTP API. Covers workspaces, databases,
+    logical backups, storages, notifiers, users and authentication, exposing
+    each domain as an endpoint object hanging off DatabasusRuby::Client.
+  DESCRIPTION
+  spec.homepage = "https://github.com/SamuelFCorrea/databasus_ruby"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2.0"
-  spec.metadata["allowed_push_host"] = "TODO: Set to your gem server 'https://example.com'"
   spec.metadata["homepage_uri"] = spec.homepage
-  spec.metadata["source_code_uri"] = "TODO: Put your gem's public repo URL here."
-  spec.metadata["changelog_uri"] = "TODO: Put your gem's CHANGELOG.md URL here."
+  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
-  # Uncomment the line below to require MFA for gem pushes.
-  # This helps protect your gem from supply chain attacks by ensuring
-  # no one can publish a new version without multi-factor authentication.
+  # Requires multi-factor authentication for gem pushes, so no one can publish
+  # a new version without it.
   # See: https://guides.rubygems.org/mfa-requirement-opt-in/
-  # spec.metadata["rubygems_mfa_required"] = "true"
+  spec.metadata["rubygems_mfa_required"] = "true"
 
   # Specify which files should be added to the gem when it is released.
   # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
@@ -38,7 +40,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Uncomment to register a new dependency of your gem
-  # spec.add_dependency "example-gem", "~> 1.0"
+  spec.add_dependency "faraday", ">= 2.3"
 
   # For more information and examples about making a new gem, check out our
   # guide at: https://guides.rubygems.org/make-your-own-gem/
