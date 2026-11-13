@@ -3,25 +3,22 @@
 RSpec.describe DatabasusRuby::Workspaces do
   subject(:workspaces) { client.workspaces }
 
+  let(:workspace) { { "id" => "ws-1", "name" => "production", "createdAt" => "2026-01-01T00:00:00Z" } }
+
   describe "#list" do
-    it "reads the unpaginated envelope" do
-      stub_api(:get, "workspaces", body: {
-                 "workspaces" => [
-                   { "id" => "ws-1", "name" => "production", "userRole" => "WORKSPACE_OWNER" },
-                   { "id" => "ws-2", "name" => "staging", "userRole" => "WORKSPACE_VIEWER" }
-                 ]
+    it "reads the cursor page" do
+      stub_api(:get, "workspaces", query: { "limit" => "2" }, body: {
+                 "items" => [workspace, { "id" => "ws-2", "name" => "staging" }], "nextCursor" => "cur-2"
                })
 
-      result = workspaces.list
+      result = workspaces.list(limit: 2)
 
-      expect(result.total).to eq(2)
       expect(result.map(&:name)).to eq(%w[production staging])
-      expect(result.first.userRole).to eq("WORKSPACE_OWNER")
-      expect(result).not_to be_paginated
+      expect(result.next_cursor).to eq("cur-2")
     end
 
     it "handles a user who belongs to none" do
-      stub_api(:get, "workspaces", body: { "workspaces" => [] })
+      stub_api(:get, "workspaces", body: { "items" => [] })
 
       expect(workspaces.list).to be_empty
     end
@@ -29,104 +26,90 @@ RSpec.describe DatabasusRuby::Workspaces do
 
   describe "crud" do
     it "creates" do
-      stub_api(:post, "workspaces", body: { "id" => "ws-9", "name" => "production" })
+      stub_api(:post, "workspaces", status: 201, body: workspace)
 
-      expect(workspaces.create(name: "production").id).to eq("ws-9")
+      expect(workspaces.create(name: "production").id).to eq("ws-1")
       expect(WebMock).to have_requested(:post, api_url("workspaces")).with(body: { "name" => "production" })
     end
 
     it "reads" do
-      stub_api(:get, "workspaces/ws-1", body: { "id" => "ws-1", "name" => "production" })
+      stub_api(:get, "workspaces/ws-1", body: workspace)
 
       expect(workspaces.get("ws-1").name).to eq("production")
+      expect(workspaces.find("ws-1").id).to eq("ws-1")
     end
 
     it "updates" do
-      stub_api(:put, "workspaces/ws-1", body: { "id" => "ws-1", "name" => "renamed" })
+      stub_api(:put, "workspaces/ws-1", body: workspace.merge("name" => "prod"))
 
-      expect(workspaces.update("ws-1", name: "renamed").name).to eq("renamed")
-      expect(WebMock).to have_requested(:put, api_url("workspaces/ws-1")).with(body: { "name" => "renamed" })
+      expect(workspaces.update("ws-1", name: "prod").name).to eq("prod")
+      expect(WebMock).to have_requested(:put, api_url("workspaces/ws-1")).with(body: { "name" => "prod" })
     end
 
     it "deletes" do
-      stub_api(:delete, "workspaces/ws-1", body: { "message" => "deleted" })
+      stub_request(:delete, api_url("workspaces/ws-1")).to_return(status: 204, body: "")
 
       expect(workspaces.delete("ws-1")).to be(true)
     end
   end
 
-  describe "#audit_logs" do
-    it "reads the paginated envelope under auditLogs" do
-      stub_api(:get, "workspaces/ws-1/audit-logs", query: { "limit" => "1", "offset" => "0" }, body: {
-                 "auditLogs" => [{ "id" => "a1", "action" => "DATABASE_CREATED" }],
-                 "total" => 9, "limit" => 1, "offset" => 0
-               })
+  describe "#transfer_ownership" do
+    it "posts the new owner's member id" do
+      stub_request(:post, api_url("workspaces/ws-1/transfer-ownership")).to_return(status: 204, body: "")
 
-      result = workspaces.audit_logs("ws-1", limit: 1, offset: 0)
-
-      expect(result.first.action).to eq("DATABASE_CREATED")
-      expect(result.total).to eq(9)
-      expect(result.next_offset).to eq(1)
+      expect(workspaces.transfer_ownership("ws-1", new_owner_member_id: "m-2")).to be(true)
+      expect(WebMock).to have_requested(:post, api_url("workspaces/ws-1/transfer-ownership"))
+        .with(body: { "newOwnerMemberId" => "m-2" })
     end
   end
 
-  describe "membership" do
-    it "lists members under the memberships path" do
-      stub_api(:get, "workspaces/memberships/ws-1/members", body: {
-                 "members" => [
-                   { "userId" => "u1", "email" => "owner@example.com", "role" => "WORKSPACE_OWNER" },
-                   { "userId" => "u2", "email" => "dev@example.com", "role" => "WORKSPACE_MEMBER" }
-                 ]
+  describe "#audit_events" do
+    it "reads /audit-events filtered by workspace and author" do
+      query = { "workspaceId" => "ws-1", "authorUserId" => "u1", "limit" => "50" }
+      stub_api(:get, "audit-events", query: query, body: {
+                 "items" => [{ "id" => "e1", "message" => "database created", "author" => { "id" => "u1" } }]
                })
 
-      result = workspaces.members("ws-1")
+      result = workspaces.audit_events("ws-1", author_user_id: "u1", limit: 50)
 
-      expect(result.total).to eq(2)
-      expect(result.map(&:email)).to eq(["owner@example.com", "dev@example.com"])
-      expect(result.first.user_id).to eq("u1")
+      expect(result.first.message).to eq("database created")
+      expect(result.first.author.id).to eq("u1")
     end
 
-    it "adds an existing user" do
-      stub_api(:post, "workspaces/memberships/ws-1/members", body: { "status" => "ADDED" })
+    it "requires the workspace id" do
+      expect { workspaces.audit_events(nil) }.to raise_error(ArgumentError, /id is required/)
+    end
+  end
 
-      result = workspaces.add_member("ws-1", email: "dev@example.com", role: "WORKSPACE_MEMBER")
+  describe "members" do
+    it "lists through /workspace-members" do
+      stub_api(:get, "workspace-members", query: { "workspaceId" => "ws-1" }, body: {
+                 "items" => [{ "id" => "m-1", "userId" => "u1", "role" => "WORKSPACE_OWNER" }]
+               })
 
-      expect(result.status).to eq("ADDED")
-      expect(WebMock).to have_requested(:post, api_url("workspaces/memberships/ws-1/members"))
-        .with(body: { "email" => "dev@example.com", "role" => "WORKSPACE_MEMBER" })
+      expect(workspaces.members("ws-1").first.role).to eq("WORKSPACE_OWNER")
     end
 
-    it "reports an invitation for a user who does not exist yet" do
-      stub_api(:post, "workspaces/memberships/ws-1/members", body: { "status" => "INVITED" })
+    it "adds a member" do
+      stub_api(:post, "workspace-members", status: 201, body: { "id" => "m-2", "role" => "WORKSPACE_ADMIN" })
 
-      expect(workspaces.add_member("ws-1", email: "new@example.com", role: "WORKSPACE_VIEWER").status)
-        .to eq("INVITED")
+      expect(workspaces.add_member("ws-1", email: "ops@example.com", role: "WORKSPACE_ADMIN").id).to eq("m-2")
+      expect(WebMock).to have_requested(:post, api_url("workspace-members"))
+        .with(body: { "workspaceId" => "ws-1", "email" => "ops@example.com", "role" => "WORKSPACE_ADMIN" })
     end
 
-    it "removes a member" do
-      stub_api(:delete, "workspaces/memberships/ws-1/members/u2", body: {})
+    it "changes a member's role by member id" do
+      stub_api(:put, "workspace-members/m-2", body: { "id" => "m-2", "role" => "WORKSPACE_VIEWER" })
 
-      expect(workspaces.remove_member("ws-1", "u2")).to be(true)
+      expect(workspaces.change_member_role("m-2", role: "WORKSPACE_VIEWER").role).to eq("WORKSPACE_VIEWER")
+      expect(WebMock).to have_requested(:put, api_url("workspace-members/m-2"))
+        .with(body: { "role" => "WORKSPACE_VIEWER" })
     end
 
-    it "changes a member role" do
-      stub_api(:put, "workspaces/memberships/ws-1/members/u2/role", body: {})
+    it "removes a member by member id" do
+      stub_request(:delete, api_url("workspace-members/m-2")).to_return(status: 204, body: "")
 
-      expect(workspaces.change_member_role("ws-1", "u2", role: "WORKSPACE_ADMIN")).to be(true)
-      expect(WebMock).to have_requested(:put, api_url("workspaces/memberships/ws-1/members/u2/role"))
-        .with(body: { "role" => "WORKSPACE_ADMIN" })
-    end
-
-    it "transfers ownership" do
-      stub_api(:post, "workspaces/memberships/ws-1/transfer-ownership", body: {})
-
-      expect(workspaces.transfer_ownership("ws-1", new_owner_email: "boss@example.com")).to be(true)
-      expect(WebMock).to have_requested(:post, api_url("workspaces/memberships/ws-1/transfer-ownership"))
-        .with(body: { "newOwnerEmail" => "boss@example.com" })
-    end
-
-    it "requires both ids" do
-      expect { workspaces.remove_member("ws-1", nil) }.to raise_error(ArgumentError, /id is required/)
+      expect(workspaces.remove_member("m-2")).to be(true)
     end
   end
 

@@ -3,93 +3,94 @@
 RSpec.describe DatabasusRuby::Notifiers do
   subject(:notifiers) { client.notifiers }
 
+  let(:notifier) do
+    { "id" => "n-1", "workspaceId" => "ws-1", "name" => "ops",
+      "settings" => { "type" => "SLACK", "channelId" => "C123" } }
+  end
+
   describe "#list" do
-    it "reads the bare-array response" do
-      stub_api(:get, "notifiers", query: { "workspace_id" => "ws-1" }, body: [
-                 { "id" => "n-1", "name" => "ops", "notifierType" => "SLACK",
-                   "slackNotifier" => { "channelId" => "C123" } },
-                 { "id" => "n-2", "name" => "mail", "notifierType" => "EMAIL" }
-               ])
+    it "reads the cursor page for the workspace" do
+      stub_api(:get, "notifiers", query: { "workspaceId" => "ws-1", "limit" => "10" },
+                                  body: { "items" => [notifier], "nextCursor" => "cur-2" })
 
-      result = notifiers.list(workspace_id: "ws-1")
+      result = notifiers.list(workspace_id: "ws-1", limit: 10)
 
-      expect(result.map(&:notifierType)).to eq(%w[SLACK EMAIL])
-      expect(result.first.slackNotifier.channelId).to eq("C123")
+      expect(result.first.settings.type).to eq("SLACK")
+      expect(result.next_cursor).to eq("cur-2")
     end
 
     it "requires a workspace" do
-      expect { notifiers.list }.to raise_error(DatabasusRuby::ConfigurationError, /workspace_id/)
+      expect { notifiers.list }.to raise_error(DatabasusRuby::ConfigurationError, /workspace_id is required/)
     end
   end
 
-  describe "#save" do
-    it "creates and is aliased as #create and #update" do
-      stub_api(:post, "notifiers", body: { "id" => "n-9", "name" => "ops" })
+  describe "#get" do
+    it "reads one notifier" do
+      stub_api(:get, "notifiers/n-1", body: notifier)
 
-      expect(notifiers.save(name: "ops", notifierType: "SLACK", workspaceId: "ws-1").id).to eq("n-9")
-      expect(notifiers.method(:create)).to eq(notifiers.method(:save))
-      expect(notifiers.method(:update)).to eq(notifiers.method(:save))
-    end
-
-    it "fills in the client default workspace" do
-      stub_api(:post, "notifiers", body: {})
-
-      client(workspace_id: "ws-default").notifiers.save(name: "ops", notifierType: "EMAIL")
-
-      expect(WebMock).to have_requested(:post, api_url("notifiers"))
-        .with(body: { "name" => "ops", "notifierType" => "EMAIL", "workspaceId" => "ws-default" })
+      expect(notifiers.get("n-1").name).to eq("ops")
+      expect(notifiers.find("n-1").id).to eq("n-1")
     end
   end
 
-  describe "#get and #delete" do
-    it "fetches one" do
-      stub_api(:get, "notifiers/n-1", body: { "id" => "n-1", "lastSendError" => "" })
+  describe "#create" do
+    it "posts to /notifiers with the client default workspace" do
+      stub_api(:post, "notifiers", status: 201, body: notifier)
 
-      expect(notifiers.get("n-1").id).to eq("n-1")
+      instance = client(workspace_id: "ws-1")
+      created = instance.notifiers.create(name: "ops", settings: { type: "SLACK", channelId: "C123" })
+
+      expect(created.id).to eq("n-1")
+      expect(WebMock).to have_requested(:post, api_url("notifiers")).with(
+        body: { "workspaceId" => "ws-1", "name" => "ops", "settings" => { "type" => "SLACK", "channelId" => "C123" } }
+      )
     end
+  end
 
-    it "deletes one" do
-      stub_api(:delete, "notifiers/n-1", body: {})
+  describe "#update" do
+    it "puts name and settings to /notifiers/{id}" do
+      stub_api(:put, "notifiers/n-1", body: notifier.merge("name" => "oncall"))
+
+      expect(notifiers.update("n-1", name: "oncall", settings: { type: "SLACK" }).name).to eq("oncall")
+      expect(WebMock).to have_requested(:put, api_url("notifiers/n-1"))
+        .with(body: { "name" => "oncall", "settings" => { "type" => "SLACK" } })
+    end
+  end
+
+  describe "#delete, #test and #transfer" do
+    it "deletes" do
+      stub_request(:delete, api_url("notifiers/n-1")).to_return(status: 204, body: "")
 
       expect(notifiers.delete("n-1")).to be(true)
     end
-  end
 
-  describe "test notifications" do
-    it "sends through a saved notifier" do
-      stub_api(:post, "notifiers/n-1/test", body: {})
+    it "sends a test notification" do
+      stub_request(:post, api_url("notifiers/n-1/test")).to_return(status: 204, body: "")
 
-      expect(notifiers.test("n-1")).to be(true)
+      expect(notifiers.test("n-1")).to be_a(DatabasusRuby::Object)
+      expect(WebMock).to have_requested(:post, api_url("notifiers/n-1/test"))
     end
 
-    it "sends through an unsaved payload" do
-      stub_api(:post, "notifiers/direct-test", body: {})
+    it "surfaces a failed test as a problem" do
+      stub_api(:post, "notifiers/n-1/test", status: 400, body: {
+                 "title" => "Bad Request", "status" => 400, "detail" => "slack answered channel_not_found",
+                 "code" => "notifier_test_failed"
+               })
 
-      notifiers.direct_test(notifierType: "WEBHOOK", webhookNotifier: { "url" => "https://hooks.test" })
-
-      expect(WebMock).to have_requested(:post, api_url("notifiers/direct-test"))
-        .with(body: { "notifierType" => "WEBHOOK", "webhookNotifier" => { "url" => "https://hooks.test" } })
+      expect { notifiers.test("n-1") }
+        .to raise_error(DatabasusRuby::BadRequestError, "slack answered channel_not_found")
     end
 
-    it "raises when delivery fails" do
-      stub_api(:post, "notifiers/n-1/test", status: 400, body: { "error" => "channel_not_found" })
+    it "transfers to another workspace" do
+      stub_api(:post, "notifiers/n-1/transfer", body: notifier.merge("workspaceId" => "ws-2"))
 
-      expect { notifiers.test("n-1") }.to raise_error(DatabasusRuby::BadRequestError, "channel_not_found")
-    end
-  end
-
-  describe "#transfer" do
-    it "moves the notifier to another workspace" do
-      stub_api(:post, "notifiers/n-1/transfer", body: {})
-
-      expect(notifiers.transfer("n-1", target_workspace_id: "ws-2")).to be(true)
+      expect(notifiers.transfer("n-1", target_workspace_id: "ws-2").workspace_id).to eq("ws-2")
       expect(WebMock).to have_requested(:post, api_url("notifiers/n-1/transfer"))
         .with(body: { "targetWorkspaceId" => "ws-2" })
     end
   end
 
   it "exposes the documented types" do
-    expect(described_class::TYPES).to include("EMAIL", "SLACK", "TEAMS")
-    expect(described_class::NOTIFICATION_TYPES).to include("ALL", "BACKUP_FAILED")
+    expect(described_class::TYPES).to include("EMAIL", "SLACK", "WEBHOOK")
   end
 end

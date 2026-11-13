@@ -4,21 +4,18 @@ module DatabasusRuby
   # Workspaces, their members and their audit trail.
   #
   #   workspace = client.workspaces.create(name: "production")
-  #   client.workspaces.add_member(workspace.id, email: "ops@example.com",
-  #                                role: "WORKSPACE_ADMIN")
+  #   client.workspaces.add_member(workspace.id, email: "ops@example.com", role: "WORKSPACE_ADMIN")
   #
-  # Note that the membership endpoints live under /workspaces/memberships/{id},
-  # where {id} is still the workspace id.
+  # Members are addressed by their member id (from #members), not their user id.
   class Workspaces < Object
     include Endpoint
 
     MEMBER_ROLES = %w[WORKSPACE_OWNER WORKSPACE_ADMIN WORKSPACE_MEMBER WORKSPACE_VIEWER].freeze
 
     # GET /workspaces — the workspaces the current user belongs to.
-    def list
-      collection(http_get("workspaces"), key: "workspaces")
+    def list(limit: nil, after: nil)
+      collection(http_get("workspaces", { limit: limit, after: after }))
     end
-
     alias all list
 
     # POST /workspaces
@@ -33,8 +30,8 @@ module DatabasusRuby
     alias find get
 
     # PUT /workspaces/{id}
-    def update(id, **attributes)
-      object(http_put("workspaces/#{escape(id)}", attributes))
+    def update(id, name:)
+      object(http_put("workspaces/#{escape(id)}", { name: name }))
     end
 
     # DELETE /workspaces/{id}
@@ -42,40 +39,36 @@ module DatabasusRuby
       acknowledged(http_delete("workspaces/#{escape(id)}"))
     end
 
-    # GET /workspaces/{id}/audit-logs
-    def audit_logs(id, limit: nil, offset: nil, before_date: nil)
-      response = http_get("workspaces/#{escape(id)}/audit-logs",
-                          { limit: limit, offset: offset, beforeDate: before_date })
-      collection(response, key: "auditLogs")
+    # POST /workspaces/{id}/transfer-ownership
+    def transfer_ownership(id, new_owner_member_id:)
+      acknowledged(http_post("workspaces/#{escape(id)}/transfer-ownership", { newOwnerMemberId: new_owner_member_id }))
     end
 
-    # GET /workspaces/memberships/{id}/members
-    def members(id)
-      collection(http_get("workspaces/memberships/#{escape(id)}/members"), key: "members")
+    # GET /audit-events
+    def audit_events(id, author_user_id: nil, limit: nil, after: nil)
+      collection(http_get("audit-events", {
+                            workspaceId: require_id(id), authorUserId: author_user_id, limit: limit, after: after
+                          }))
     end
 
-    # POST /workspaces/memberships/{id}/members — adds an existing user or
-    # invites a new one; the response `status` says which happened
-    # (ADDED or INVITED). `role` is one of MEMBER_ROLES.
+    # GET /workspace-members
+    def members(id, limit: nil, after: nil)
+      collection(http_get("workspace-members", { workspaceId: require_id(id), limit: limit, after: after }))
+    end
+
+    # POST /workspace-members — `role` is one of MEMBER_ROLES except the owner.
     def add_member(id, email:, role:)
-      object(http_post("workspaces/memberships/#{escape(id)}/members", { email: email, role: role }))
+      object(http_post("workspace-members", { workspaceId: require_id(id), email: email, role: role }))
     end
 
-    # DELETE /workspaces/memberships/{id}/members/{userId}
-    def remove_member(id, user_id)
-      acknowledged(http_delete("workspaces/memberships/#{escape(id)}/members/#{escape(user_id)}"))
+    # DELETE /workspace-members/{memberId}
+    def remove_member(member_id)
+      acknowledged(http_delete("workspace-members/#{escape(member_id)}"))
     end
 
-    # PUT /workspaces/memberships/{id}/members/{userId}/role
-    def change_member_role(id, user_id, role:)
-      acknowledged(http_put("workspaces/memberships/#{escape(id)}/members/#{escape(user_id)}/role",
-                            { role: role }))
-    end
-
-    # POST /workspaces/memberships/{id}/transfer-ownership
-    def transfer_ownership(id, new_owner_email:)
-      acknowledged(http_post("workspaces/memberships/#{escape(id)}/transfer-ownership",
-                             { newOwnerEmail: new_owner_email }))
+    # PUT /workspace-members/{memberId}
+    def change_member_role(member_id, role:)
+      object(http_put("workspace-members/#{escape(member_id)}", { role: role }))
     end
   end
 end

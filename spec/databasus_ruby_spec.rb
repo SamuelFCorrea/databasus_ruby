@@ -10,6 +10,7 @@ RSpec.describe DatabasusRuby do
     expect(described_class::Backups).to be < described_class::Object
     expect(described_class::Databases).to be < described_class::Object
     expect(described_class::Notifiers).to be < described_class::Object
+    expect(described_class::Restores).to be < described_class::Object
     expect(described_class::Storages).to be < described_class::Object
     expect(described_class::Users).to be < described_class::Object
     expect(described_class::Workspaces).to be < described_class::Object
@@ -19,5 +20,6 @@ RSpec.describe DatabasusRuby do
     expect(described_class::AuthenticationError).to be < described_class::APIError
     expect(described_class::APIError).to be < described_class::Error
     expect(described_class::ConfigurationError).to be < described_class::Error
+    expect(described_class::SignInCodeRequiredError).to be < described_class::Error
   end
 end

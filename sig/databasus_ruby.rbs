@@ -9,16 +9,30 @@ module DatabasusRuby
   class ConfigurationError < Error
   end
 
+  class SignInCodeRequiredError < Error
+    attr_reader pending_sign_in_id: String
+    attr_reader email: String
+
+    def initialize: (pending_sign_in_id: String, email: String) -> void
+  end
+
   class APIError < Error
     STATUS_ERRORS: Hash[Integer, singleton(APIError)]
 
     attr_reader status: Integer?
     attr_reader body: untyped
     attr_reader response: untyped
+    attr_reader code: String?
 
-    def initialize: (?String? message, ?status: Integer?, ?body: untyped, ?response: untyped) -> void
-    def self.from_response: (untyped response) -> APIError
+    def initialize: (?String? message, ?status: Integer?, ?body: untyped, ?response: untyped, ?code: String?) -> void
+    def self.from_response: (untyped response, ?body: untyped) -> APIError
     def self.for_status: (Integer status) -> singleton(APIError)
+
+    private
+
+    def self.message_from: (untyped body) -> String?
+    def self.problem_message: (payload problem) -> String?
+    def self.code_from: (untyped body) -> String?
   end
 
   class BadRequestError < APIError
@@ -43,19 +57,26 @@ module DatabasusRuby
   end
 
   class Object
-    def initialize: (?payload attributes) -> void
+    def initialize: (?payload? attributes) -> void
     def to_h: () -> payload
-    def to_hash: () -> payload
+    alias to_hash to_h
     def []: (String | Symbol key) -> untyped
     def key?: (String | Symbol key) -> bool
-    def has_key?: (String | Symbol key) -> bool
+    alias has_key? key?
     def keys: () -> Array[String]
     def ==: (untyped other) -> bool
-    def eql?: (untyped other) -> bool
+    alias eql? ==
     def hash: () -> Integer
     def inspect: () -> String
     def method_missing: (Symbol name, *untyped args) ?{ (?) -> untyped } -> untyped
     def respond_to_missing?: (Symbol name, ?bool include_private) -> bool
+
+    private
+
+    def normalize: (untyped attributes) -> payload?
+    def fetch_attribute: (String key) -> untyped
+    def wrap: (untyped value) -> untyped
+    def camelize: (String key) -> String
   end
 
   class Record < Object
@@ -69,37 +90,39 @@ module DatabasusRuby
   end
 
   class Database < Record
-    def backups: (**untyped) -> Collection
+    def backups: (**untyped filters) -> Collection
     def backup: () -> Object
   end
 
   class Collection
     include Enumerable[Object]
 
+    PAGE_KEYS: Array[String]
+
     attr_reader data: Array[Object]
-    attr_reader total: Integer
-    attr_reader limit: Integer?
-    attr_reader offset: Integer?
+    attr_reader next_cursor: String?
+    attr_reader extras: Object
 
     def initialize: (
       ?data: Array[payload | Object],
-      ?total: Integer?,
-      ?limit: Integer?,
-      ?offset: Integer?,
-      ?wrap: ^(payload) -> Object | nil
+      ?next_cursor: String?,
+      ?extras: payload | Object,
+      ?wrap: (^(payload) -> Object)?
     ) -> void
-    def self.from: (untyped body, key: String, ?wrap: (^(payload) -> Object)?) -> Collection
+    def self.from: (untyped body, ?wrap: (^(payload) -> Object)?) -> Collection
     def each: () { (Object) -> void } -> Collection
             | () -> Enumerator[Object, Array[Object]]
     def size: () -> Integer
-    def length: () -> Integer
+    alias length size
     def empty?: () -> bool
     def []: (Integer index) -> Object?
     def last: () -> Object?
-    def paginated?: () -> bool
-    def next_offset: () -> Integer?
     def last_page?: () -> bool
     def inspect: () -> String
+
+    private
+
+    def self.from_page: (payload page, (^(payload) -> Object)? wrap) -> Collection
   end
 
   module Endpoint
@@ -115,26 +138,24 @@ module DatabasusRuby
     def http_put: (String path, ?payload? body, ?params: payload?) -> untyped
     def http_delete: (String path, ?payload? params) -> untyped
     def object: (untyped response, ?as: singleton(Object)) -> Object
-    def collection: (untyped response, key: String, ?as: singleton(Object)) -> Collection
+    def collection: (untyped response, ?as: singleton(Object)) -> Collection
     def build: (singleton(Object) klass, payload attributes) -> Object
-    def acknowledged: (untyped response) -> bool
-    def single_value: (untyped response) -> untyped
+    def acknowledged: (untyped response) -> true
     def compact: (untyped body) -> untyped
     def with_default_workspace: (payload attributes) -> payload
     def escape: (untyped segment) -> String
+    def require_id: (untyped segment) -> String
   end
 
   class Client
     attr_reader adapter: untyped
     attr_reader url: String
     attr_accessor api_key: String?
-    attr_accessor agent_id: String?
     attr_accessor workspace_id: String?
 
     def initialize: (
       ?api_key: String?,
       ?url: String?,
-      ?agent_id: String?,
       ?workspace_id: String?,
       ?adapter: untyped
     ) -> void
@@ -144,11 +165,11 @@ module DatabasusRuby
     def backups: () -> Backups
     def databases: () -> Databases
     def notifiers: () -> Notifiers
+    def restores: () -> Restores
     def storages: () -> Storages
     def users: () -> Users
     def workspaces: () -> Workspaces
     def workspace_id!: () -> String
-    def agent_id!: () -> String
     def request: (
       Symbol method,
       String path,
@@ -156,49 +177,69 @@ module DatabasusRuby
       ?body: untyped,
       ?headers: Hash[String, String]?
     ) -> untyped
+    def stream: (String path, io: _Writer, ?params: payload?) -> Integer
     def inspect: () -> String
+
+    private
+
+    def prepare: (untyped req, ?params: payload?, ?headers: Hash[String, String]?) -> untyped
+    def request_headers: (Hash[String, String]? extra) -> Hash[String, String]
+    def normalize_url: (untyped url) -> String
+    def stringify: (payload params) -> Hash[String, untyped]
+
+    # Private constant in Ruby (private_constant :StreamSink).
+    class StreamSink
+      attr_reader written: Integer
+      attr_reader error_body: String
+
+      def initialize: (_Writer io) -> void
+      def to_proc: () -> ^(String chunk, Integer received, untyped env) -> untyped
+      def decoded_error_body: () -> untyped
+
+      private
+
+      def write: (String chunk, untyped env) -> untyped
+    end
   end
 
   class Auth < Object
     include Endpoint
 
     def signin: (email: String, password: String, ?cloudflare_turnstile_token: String?) -> Object
+    def verify_sign_in_code: (String pending_sign_in_id, code: String, ?cloudflare_turnstile_token: String?) -> Object
     def signup: (email: String, name: String, password: String, ?cloudflare_turnstile_token: String?) -> Object
-    def github_callback: (code: String, redirect_uri: String) -> Object
-    def google_callback: (code: String, redirect_uri: String) -> Object
-    def send_reset_password_code: (email: String, ?cloudflare_turnstile_token: String?) -> Object
-    def reset_password: (email: String, code: String, new_password: String) -> Object
+    def request_password_reset: (email: String, ?cloudflare_turnstile_token: String?) -> true
+    def reset_password: (email: String, code: String, new_password: String) -> true
+
+    private
+
+    def authorize: (Object result) -> Object
   end
 
   class Backups < Object
     include Endpoint
 
     STATUSES: Array[String]
-    ENCRYPTIONS: Array[String]
     VERIFICATION_STATUSES: Array[String]
 
     def list: (
       database_id: String,
-      ?limit: Integer?,
-      ?offset: Integer?,
       ?status: (String | Array[String])?,
-      ?before_date: String?,
-      ?pg_wal_backup_type: String?
-    ) -> Collection
-    def all: (
-      database_id: String,
+      ?created_before: String?,
       ?limit: Integer?,
-      ?offset: Integer?,
-      ?status: (String | Array[String])?,
-      ?before_date: String?,
-      ?pg_wal_backup_type: String?
+      ?after: String?
     ) -> Collection
+    alias all list
+    def get: (String id) -> Object
+    alias find get
     def create: (database_id: String) -> Object
-    def trigger: (database_id: String) -> Object
-    def delete: (String id) -> bool
-    def cancel: (String id) -> bool
+    alias trigger create
+    def delete: (String id) -> true
+    def cancel: (String id) -> Object
     def download_token: (String id) -> Object
     def file: (String id, token: String) -> String
+    def download_to: (String id, _Writer io) -> Object
+    def file_to: (String id, _Writer io, token: String) -> Integer
     def download: (String id) -> [String, String]
   end
 
@@ -206,25 +247,19 @@ module DatabasusRuby
     include Endpoint
 
     TYPES: Array[String]
-    HEALTH_STATUSES: Array[String]
 
-    def list: (?workspace_id: String?) -> Collection
-    def all: (?workspace_id: String?) -> Collection
+    def list: (?workspace_id: String?, ?notifier_id: String?, ?limit: Integer?, ?after: String?) -> Collection
+    alias all list
+    def list_all: (?workspace_id: String?, ?limit: Integer) -> Array[Database]
     def get: (String id) -> Database
-    def find: (String id) -> Database
-    def create: (**untyped) -> Database
-    def update: (**untyped) -> Database
-    def delete: (String id) -> bool
+    alias find get
+    def create: (**untyped attributes) -> Database
+    def update: (String id, **untyped attributes) -> Database
+    def delete: (String id) -> true
     def copy: (String id) -> Database
-    def test_connection: (String id) -> bool
-    def test_connection_direct: (**untyped) -> bool
-    def create_readonly_user: (**untyped) -> Object
-    def create_replication_only_user: (**untyped) -> Object
-    def readonly: (**untyped) -> Object
-    def readonly?: (**untyped) -> bool
-    def notifier_databases_count: (String notifier_id) -> untyped
-    def notifier_using?: (String notifier_id) -> bool
-    def backups: (String id, **untyped) -> Collection
+    def test: (String id) -> Object
+    def connected?: (String id) -> bool
+    def backups: (String id, **untyped filters) -> Collection
     def backup: (String id) -> Object
   end
 
@@ -232,19 +267,45 @@ module DatabasusRuby
     include Endpoint
 
     TYPES: Array[String]
-    NOTIFICATION_TYPES: Array[String]
 
-    def list: (?workspace_id: String?) -> Collection
-    def all: (?workspace_id: String?) -> Collection
+    def list: (?workspace_id: String?, ?limit: Integer?, ?after: String?) -> Collection
+    alias all list
     def get: (String id) -> Object
-    def find: (String id) -> Object
-    def save: (**untyped) -> Object
-    def create: (**untyped) -> Object
-    def update: (**untyped) -> Object
-    def delete: (String id) -> bool
-    def test: (String id) -> bool
-    def direct_test: (**untyped) -> bool
-    def transfer: (String id, target_workspace_id: String) -> bool
+    alias find get
+    def create: (**untyped attributes) -> Object
+    def update: (String id, **untyped attributes) -> Object
+    def delete: (String id) -> true
+    def test: (String id) -> Object
+    def transfer: (String id, target_workspace_id: String) -> Object
+  end
+
+  class Restores < Object
+    include Endpoint
+
+    STATUSES: Array[String]
+    SSL_MODES: Array[String]
+
+    def self.postgresql_target: (
+      host: String,
+      port: Integer,
+      username: String,
+      password: String,
+      database: String,
+      ?ssl_mode: String,
+      ?cpu_count: Integer,
+      ?exclude_extensions: bool,
+      ?restore_ownership: bool,
+      ?restore_privileges: bool,
+      ?ssh_tunnel: payload?
+    ) -> Hash[Symbol, untyped]
+
+    def list: (backup_id: String, ?limit: Integer?, ?after: String?) -> Collection
+    alias all list
+    def start: (backup_id: String, target: payload) -> Object
+    alias create start
+    def get: (String id) -> Object
+    alias find get
+    def cancel: (String id) -> Object
   end
 
   class Storages < Object
@@ -252,17 +313,16 @@ module DatabasusRuby
 
     TYPES: Array[String]
 
-    def list: (?workspace_id: String?) -> Collection
-    def all: (?workspace_id: String?) -> Collection
+    def list: (?workspace_id: String?, ?limit: Integer?, ?after: String?) -> Collection
+    alias all list
     def get: (String id) -> Object
-    def find: (String id) -> Object
-    def save: (**untyped) -> Object
-    def create: (**untyped) -> Object
-    def update: (**untyped) -> Object
-    def delete: (String id) -> bool
-    def test: (String id) -> bool
-    def direct_test: (**untyped) -> bool
-    def transfer: (String id, target_workspace_id: String) -> bool
+    alias find get
+    def create: (**untyped attributes) -> Object
+    def update: (String id, **untyped attributes) -> Object
+    def delete: (String id) -> true
+    def backup_usage: (String id) -> Object
+    def test: (String id) -> Object
+    def transfer: (String id, target_workspace_id: String) -> Object
   end
 
   class Users < Object
@@ -270,19 +330,17 @@ module DatabasusRuby
 
     ROLES: Array[String]
 
-    def me: () -> Object
-    def update_me: (?name: String?, ?email: String?) -> Object
-    def change_password: (new_password: String) -> Object
-    def invite: (email: String, ?intended_workspace_id: String?, ?intended_workspace_role: String?) -> Object
-    def list: (?limit: Integer?, ?offset: Integer?, ?before_date: String?, ?query: String?) -> Collection
-    def all: (?limit: Integer?, ?offset: Integer?, ?before_date: String?, ?query: String?) -> Collection
+    def list: (?query: String?, ?limit: Integer?, ?after: String?) -> Collection
+    alias all list
     def get: (String id) -> Object
-    def find: (String id) -> Object
-    def activate: (String id) -> bool
-    def deactivate: (String id) -> bool
-    def change_role: (String id, role: String) -> bool
+    alias find get
+    def update: (String id, name: String, email: String) -> Object
+    def change_password: (String id, new_password: String) -> true
+    def activate: (String id) -> true
+    def deactivate: (String id) -> true
+    def change_role: (String id, role: String) -> true
     def settings: () -> Object
-    def update_settings: (**untyped) -> Object
+    def update_settings: (**untyped attributes) -> Object
   end
 
   class Workspaces < Object
@@ -290,18 +348,18 @@ module DatabasusRuby
 
     MEMBER_ROLES: Array[String]
 
-    def list: () -> Collection
-    def all: () -> Collection
+    def list: (?limit: Integer?, ?after: String?) -> Collection
+    alias all list
     def create: (name: String) -> Object
     def get: (String id) -> Object
-    def find: (String id) -> Object
-    def update: (String id, **untyped) -> Object
-    def delete: (String id) -> bool
-    def audit_logs: (String id, ?limit: Integer?, ?offset: Integer?, ?before_date: String?) -> Collection
-    def members: (String id) -> Collection
+    alias find get
+    def update: (String id, name: String) -> Object
+    def delete: (String id) -> true
+    def transfer_ownership: (String id, new_owner_member_id: String) -> true
+    def audit_events: (String id, ?author_user_id: String?, ?limit: Integer?, ?after: String?) -> Collection
+    def members: (String id, ?limit: Integer?, ?after: String?) -> Collection
     def add_member: (String id, email: String, role: String) -> Object
-    def remove_member: (String id, String user_id) -> bool
-    def change_member_role: (String id, String user_id, role: String) -> bool
-    def transfer_ownership: (String id, new_owner_email: String) -> bool
+    def remove_member: (String member_id) -> true
+    def change_member_role: (String member_id, role: String) -> Object
   end
 end

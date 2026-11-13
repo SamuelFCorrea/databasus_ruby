@@ -6,6 +6,7 @@ module DatabasusRuby
   #   database = client.databases.get(id)
   #   database.backups(status: "COMPLETED")
   #   database.backup                       # queue a run
+  #   database.settings.database            # name of the database on its server (PostgreSQL)
   #
   # Both delegate to the Backups endpoint, which owns the requests.
   class Database < Record
