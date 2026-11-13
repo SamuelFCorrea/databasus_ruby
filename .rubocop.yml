@@ -27,3 +27,8 @@ Gemspec/DevelopmentDependencies:
 Naming/PredicateMethod:
   AllowedMethods:
     - acknowledged
+
+# Request payloads are written as one hash literal per call; a long literal is
+# still one statement.
+Metrics/MethodLength:
+  CountAsOne: ["hash", "array"]

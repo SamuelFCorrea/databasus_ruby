@@ -39,4 +39,15 @@ RSpec.configure do |config|
   end
 
   config.include ClientHelpers
+
+  # WebMock normalizes query strings with the subscript notation, which keeps
+  # only the last of `status=A&status=B`. Examples about repeated keys opt into
+  # the flat-array notation, which keeps every value.
+  config.around(:each, :flat_query) do |example|
+    previous = WebMock::Config.instance.query_values_notation
+    WebMock::Config.instance.query_values_notation = :flat_array
+    example.run
+  ensure
+    WebMock::Config.instance.query_values_notation = previous
+  end
 end

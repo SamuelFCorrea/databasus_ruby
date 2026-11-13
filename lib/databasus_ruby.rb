@@ -6,9 +6,11 @@ require_relative "databasus_ruby/version"
 
 # Ruby client for the Databasus backup-management API.
 #
-#   client = DatabasusRuby::Client.new(api_key: ENV["DATABASUS_API_KEY"],
-#                                     url: "https://databasus.example.com/api/v1/")
+#   client = DatabasusRuby::Client.new(url: "https://databasus.example.com/api/v1/")
+#   client.auth.signin(email: ENV["DATABASUS_EMAIL"], password: ENV["DATABASUS_PASSWORD"])
 #   client.databases.list(workspace_id: workspace_id)
+#
+# Targets the Databasus API of 3.65 and later.
 #
 # See DatabasusRuby::Client for how the endpoint domains hang off the client.
 module DatabasusRuby
@@ -20,6 +22,7 @@ module DatabasusRuby
 
   autoload :Error, "databasus_ruby/error"
   autoload :ConfigurationError, "databasus_ruby/error"
+  autoload :SignInCodeRequiredError, "databasus_ruby/error"
   autoload :APIError, "databasus_ruby/error"
   autoload :BadRequestError, "databasus_ruby/error"
   autoload :AuthenticationError, "databasus_ruby/error"
@@ -33,6 +36,7 @@ module DatabasusRuby
   autoload :Backups, "databasus_ruby/objects/backups"
   autoload :Databases, "databasus_ruby/objects/databases"
   autoload :Notifiers, "databasus_ruby/objects/notifiers"
+  autoload :Restores, "databasus_ruby/objects/restores"
   autoload :Storages, "databasus_ruby/objects/storages"
   autoload :Users, "databasus_ruby/objects/users"
   autoload :Workspaces, "databasus_ruby/objects/workspaces"

@@ -49,9 +49,9 @@ module DatabasusRuby
       build(as, response.body.is_a?(Hash) ? response.body : {})
     end
 
-    # Wraps a list response; `key` names the array inside an envelope payload.
-    def collection(response, key:, as: Object)
-      Collection.from(response.body, key: key, wrap: ->(item) { build(as, item) })
+    # Wraps a cursor-page list response.
+    def collection(response, as: Object)
+      Collection.from(response.body, wrap: ->(item) { build(as, item) })
     end
 
     # Records need the client to reach their related endpoints; plain payload
@@ -63,13 +63,6 @@ module DatabasusRuby
     # For endpoints that answer 200/204 with no meaningful body.
     def acknowledged(_response)
       true
-    end
-
-    # Endpoints answering a single-entry map whose key is not documented in the
-    # swagger schema, e.g. GET /databases/notifier/{id}/is-using.
-    def single_value(response)
-      body = response.body
-      body.is_a?(Hash) ? body.values.first : body
     end
 
     # Request bodies are built from keyword arguments, and the API distinguishes
